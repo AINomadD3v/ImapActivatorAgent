@@ -47,6 +47,7 @@
         "packaging"
         "pip"
         "setuptools"
+        "pytz"
       ];
 
       pythonEnv = pythonOverridden.withPackages (
