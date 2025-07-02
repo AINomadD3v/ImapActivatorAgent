@@ -2,13 +2,22 @@
 
 import concurrent.futures
 import logging
+import os
 import random
 import re
+import sys
 from dataclasses import dataclass
 
-# Assumes your AirtableClient class is in a file named imap_airtable.py
-from imap_airtable import AirtableClient
 from playwright.sync_api import Page, TimeoutError, expect, sync_playwright
+
+# Add the project root to the sys.path to allow imports from other modules
+script_dir = os.path.dirname(__file__)
+project_root = os.path.abspath(os.path.join(script_dir, os.pardir))
+sys.path.insert(0, project_root)
+
+
+# Assumes your AirtableClient class is in a file named imap_airtable.py
+from Utils.imap_airtable import AirtableClient
 
 # --- 1. Professional Logging Setup ---
 logging.basicConfig(
@@ -27,7 +36,7 @@ class Config:
         "https://konto.onet.pl/en/signin?state=https%3A%2F%2Fpoczta.onet.pl%2F&client_id=poczta.onet.pl.front.onetapi.pl"
     )
     HEADLESS_MODE: bool = True
-    ACCOUNTS_TO_PROCESS: int = 10
+    ACCOUNTS_TO_PROCESS: int = 2
     MAX_WORKERS: int = 2
 
 
@@ -75,6 +84,11 @@ class OnetImapActivator:
                 try:
                     result = future.result()
                     self._update_airtable_record(result)
+                except (concurrent.futures.CancelledError, KeyboardInterrupt):
+                    logging.warning(
+                        f"Processing for {account.get('email', 'N/A')} was cancelled externally. No Airtable update."
+                    )
+                    # Do not update Airtable for external cancellations
                 except Exception as e:
                     logging.error(
                         f"A fatal error occurred processing {account.get('email', 'N/A')}: {e}",
@@ -247,70 +261,88 @@ class OnetImapActivator:
 
     def _navigate_and_enable_protocols(self, page: Page, email: str):
         """Navigates to settings from the inbox and toggles IMAP/POP3."""
-        logging.info("Navigating to settings...")
         try:
-            page.get_by_role("button", name="").click()
-            page.get_by_role(
-                "link", name=re.compile(r"Ustawienia", re.IGNORECASE)
-            ).click()
-            expect(page).to_have_url(
-                re.compile(r".*ustawienia.poczta.onet.pl.*"), timeout=15000
+            # 1. Wait for the main inbox UI to be ready by finding the "Compose" button.
+            logging.info("Waiting for inbox to load...")
+            compose_button = page.get_by_role(
+                "button", name=re.compile("napisz wiadomość|compose", re.IGNORECASE)
             )
-            logging.info("Navigated to settings page.")
+            expect(
+                compose_button, "The 'Compose' button should be visible after login"
+            ).to_be_visible(timeout=30000)
+            logging.info("Inbox loaded. Proceeding with navigation.")
 
-            # This check remains valid.
+            # 2. Click the Hamburger Menu in the top-left corner.
+            hamburger_menu = page.get_by_role("button", name="Otwórz menu aplikacji")
+            expect(
+                hamburger_menu, "Hamburger menu button should be visible"
+            ).to_be_visible(timeout=10000)
+            hamburger_menu.click()
+            logging.info("Clicked the hamburger menu.")
+
+            # 3. Click the Settings gear icon, which is a LINK (<a> tag).
+            settings_gear_link = page.get_by_role("link", name="Ustawienia")
+            expect(
+                settings_gear_link,
+                "Settings gear icon (link) should appear after clicking menu",
+            ).to_be_visible(timeout=10000)
+            settings_gear_link.click()
+            logging.info("Clicked the settings gear link.")
+
+            # We now expect to be on the main settings page directly.
+            expect(page).to_have_url(
+                re.compile(r".*ustawienia.poczta.onet.pl.*"), timeout=20000
+            )
+            logging.info("Successfully navigated to settings page.")
+
             if not page.locator('label[for="popCheck"]').is_visible(timeout=5000):
                 logging.info(
-                    "Settings not immediately visible, clicking 'Konto główne'..."
+                    "IMAP/POP settings not immediately visible, clicking 'Konto główne' tab..."
                 )
                 page.get_by_role("button", name="Konto główne").click()
 
-            # --- START OF MODIFIED SECTION ---
+            # --- START: FIX FOR TYPE ERROR ---
 
-            # 1. CORRECTED LOCATORS: Target the <label> as the container.
+            # Enable POP3
             pop3_container = page.locator('label[for="popCheck"]')
-            imap_container = page.locator('label[for="imapCheck"]')
-
-            # 2. Check and Enable POP3 with Text Verification
-            logging.info("Checking POP3 status...")
             expect(pop3_container).to_be_visible(timeout=10000)
 
-            # Get text content and check for None to prevent type errors.
-            pop3_status = pop3_container.text_content()
-            if pop3_status and "Wyłączony" in pop3_status:
+            # Store text_content in a variable to ensure it's not None
+            pop3_text = pop3_container.text_content()
+            if pop3_text and "Wyłączony" in pop3_text:
                 logging.info("POP3 is OFF. Enabling it now...")
-                pop3_container.dispatch_event("click")
-                # Verify the text changes to "On" inside the container.
+                pop3_container.click()
                 expect(
                     pop3_container.locator('span:text-is("Włączony")')
                 ).to_be_visible(timeout=10000)
-                logging.info("POP3 has been successfully turned ON and verified.")
-                page.wait_for_timeout(5000)  # Wait 2 seconds for the setting to save
+                logging.info("POP3 has been successfully turned ON.")
+                page.wait_for_timeout(2000)
             else:
                 logging.info("POP3 is already ON.")
 
-            # 3. Check and Enable IMAP with Text Verification
-            logging.info("Checking IMAP status...")
+            # Enable IMAP
+            imap_container = page.locator('label[for="imapCheck"]')
             expect(imap_container).to_be_visible(timeout=10000)
 
-            # Get text content and check for None to prevent type errors.
-            imap_status = imap_container.text_content()
-            if imap_status and "Wyłączony" in imap_status:
+            # Store text_content in a variable to ensure it's not None
+            imap_text = imap_container.text_content()
+            if imap_text and "Wyłączony" in imap_text:
                 logging.info("IMAP is OFF. Enabling it now...")
-                imap_container.dispatch_event("click")
-                # Verify the text changes to "On" inside the container.
+                imap_container.click()
                 expect(
                     imap_container.locator('span:text-is("Włączony")')
                 ).to_be_visible(timeout=10000)
-                logging.info("IMAP has been successfully turned ON and verified.")
-                page.wait_for_timeout(5000)  # Wait 2 seconds for the setting to save
+                logging.info("IMAP has been successfully turned ON.")
+                page.wait_for_timeout(2000)
             else:
                 logging.info("IMAP is already ON.")
-            # --- END OF MODIFIED SECTION ---
+
+            # --- END: FIX FOR TYPE ERROR ---
+
         except Exception as e:
-            # The main exception handler in _activate_single_account will catch this
-            # and trigger the DOM dump.
-            logging.error(f"An error occurred on the settings page for {email}.")
+            screenshot_path = f"error_screenshot_{email}.png"
+            page.screenshot(path=screenshot_path)
+            logging.error(f"An error occurred. Saved screenshot to {screenshot_path}")
             raise e
 
 
