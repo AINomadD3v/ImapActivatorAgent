@@ -1,0 +1,98 @@
+# Python cache and compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+*.pyc
+*.so
+*.egg
+*.egg-info/
+.installed.cfg
+
+.direnv/
+# Virtual environments
+.envrc
+.env
+.venv/
+venv/
+env/
+ENV/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Build and packaging
+build/
+dist/
+/downloads/
+develop-eggs/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.manifest
+*.spec
+target/
+
+# Logs and databases
+*.log
+*.db
+logs/
+instagram_accounts.db
+
+# Testing
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+htmlcov/
+
+# IDE and editor settings
+.idea/
+.vscode/
+*.sublime-workspace
+*.sublime-project
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+
+# Jupyter
+.ipynb_checkpoints
+
+# OS-specific files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# Node/JavaScript (if applicable)
+node_modules/
+package-lock.json
+yarn.lock
+.pnpm-debug.log
+
+# Compiled binaries
+*.o
+*.out
+*.class
+
+# Auth and secrets
+credentials.json
+token.pickle
+
